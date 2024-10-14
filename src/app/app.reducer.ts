@@ -48,6 +48,8 @@ import { ThemeState, themeReducer } from './shared/theme-support/theme.reducer';
 import { MenusState } from './shared/menu/menus-state.model';
 import { correlationIdReducer } from './correlation-id/correlation-id.reducer';
 import { contextHelpReducer, ContextHelpState } from './shared/context-help.reducer';
+import {SearchModel} from './shared/search/@ngrx/search.initial';
+import {searchReducers} from './shared/search/@ngrx/search.reducers';
 
 export interface AppState {
   router: RouterReducerState;
@@ -57,6 +59,7 @@ export interface AppState {
   notifications: NotificationsState;
   sidebar: SidebarState;
   searchFilter: SearchFiltersState;
+  search: SearchModel;
   truncatable: TruncatablesState;
   cssVariables: CSSVariablesState;
   theme: ThemeState;
@@ -79,6 +82,7 @@ export const appReducers: ActionReducerMap<AppState> = {
   notifications: notificationsReducer,
   sidebar: sidebarReducer,
   searchFilter: filterReducer,
+  search: searchReducers,
   truncatable: truncatableReducer,
   cssVariables: cssVariablesReducer,
   theme: themeReducer,

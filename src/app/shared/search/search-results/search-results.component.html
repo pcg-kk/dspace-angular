@@ -2,7 +2,8 @@
     <h2 *ngIf="!disableHeader">{{ (configuration ? configuration + '.search.results.head' : 'search.results.head') | translate }}</h2>
     <ds-search-export-csv *ngIf="showCsvExport" [searchConfig]="searchConfig"></ds-search-export-csv>
 </div>
-<div *ngIf="searchResults && searchResults?.hasSucceeded && !searchResults?.isLoading && searchResults?.payload?.page.length > 0" @fadeIn>
+
+<div *ngIf="results$ | async as searchResults; " @fadeIn>
     <ds-viewable-collection
             [config]="searchConfig.pagination"
             [sortConfig]="searchConfig.sort"
@@ -19,8 +20,9 @@
             (selectObject)="selectObject.emit($event)">
     </ds-viewable-collection>
 </div>
-<ds-themed-loading *ngIf="isLoading()" message="{{'loading.search-results' | translate}}"></ds-themed-loading>
-<ds-error *ngIf="showError()"
+
+<ds-themed-loading *ngIf="isLoading$ | async" message="{{'loading.search-results' | translate}}"></ds-themed-loading>
+<ds-error *ngIf="isError$ | async"
           message="{{errorMessageLabel() | translate}}"></ds-error>
 <div *ngIf="searchResults?.payload?.page.length == 0 || searchResults?.statusCode == 400">
     {{ 'search.results.no-results' | translate }}

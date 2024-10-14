@@ -3,3 +3,7 @@ rest:
   host: demo.dspace.org
   port: 443
   nameSpace: /server
+languages:
+  - code: en
+    label: English
+    active: true

@@ -38,6 +38,9 @@ import { WorkspaceItem } from '../..//core/submission/models/workspaceitem.model
 import { ITEM_MODULE_PATH } from '../../item-page/item-page-routing-paths';
 import { COLLECTION_MODULE_PATH } from '../../collection-page/collection-page-routing-paths';
 import { COMMUNITY_MODULE_PATH } from '../../community-page/community-page-routing-paths';
+import {Store} from '@ngrx/store';
+import {SearchModel} from './@ngrx/search.initial';
+import {startSearch} from './@ngrx/search.actions';
 
 @Component({
   selector: 'ds-search',
@@ -273,7 +276,8 @@ export class SearchComponent implements OnInit {
               protected windowService: HostWindowService,
               @Inject(SEARCH_CONFIG_SERVICE) public searchConfigService: SearchConfigurationService,
               protected routeService: RouteService,
-              protected router: Router) {
+              protected router: Router,
+              protected store: Store<SearchModel>,) {
     this.isXsOrSm$ = this.windowService.isXsOrSm();
   }
 
@@ -429,35 +433,42 @@ export class SearchComponent implements OnInit {
    * @param searchOptions
    * @private
    */
-  private retrieveSearchResults(searchOptions: PaginatedSearchOptions) {
-    this.resultsRD$.next(null);
-    this.lastSearchOptions = searchOptions;
-    let followLinks = [
-      followLink<Item>('thumbnail', { isOptional: true }),
-      followLink<SubmissionObject>('item', { isOptional: true }, followLink<Item>('thumbnail', { isOptional: true })) as any,
-      followLink<Item>('accessStatus', { isOptional: true, shouldEmbed: environment.item.showAccessStatuses }),
-    ];
-    if (this.configuration === 'supervision') {
-      followLinks.push(followLink<WorkspaceItem>('supervisionOrders', { isOptional: true }) as any);
-    }
-    this.service.search(
-      searchOptions,
-      undefined,
-      this.useCachedVersionIfAvailable,
-      true,
-      ...followLinks
-      ).pipe(getFirstCompletedRemoteData())
-      .subscribe((results: RemoteData<SearchObjects<DSpaceObject>>) => {
-        if (results.hasSucceeded) {
-          if (this.trackStatistics) {
-            this.service.trackSearch(searchOptions, results.payload);
-          }
-          if (results.payload?.page?.length > 0) {
-            this.resultFound.emit(results.payload);
-          }
-        }
-        this.resultsRD$.next(results);
-      });
+  private retrieveSearchResults (searchOptions: PaginatedSearchOptions) {
+    console.log('retrieveSearchResults');
+    this.store.dispatch(startSearch({searchOptions}));
+    // console.time('retrieveSearchResults START PROCESS');
+    // console.time('retrieveSearchResults');
+    // console.time('retrieveSearchResults1');
+    // console.time('retrieveSearchResults2');
+    // console.time('retrieveSearchResults3');
+  //   this.resultsRD$.next(null);
+  //   this.lastSearchOptions = searchOptions;
+  //   let followLinks = [
+  //     followLink<Item>('thumbnail', { isOptional: true }),
+  //     followLink<SubmissionObject>('item', { isOptional: true }, followLink<Item>('thumbnail', { isOptional: true })) as any,
+  //     followLink<Item>('accessStatus', { isOptional: true, shouldEmbed: environment.item.showAccessStatuses }),
+  //   ];
+  //   if (this.configuration === 'supervision') {
+  //     followLinks.push(followLink<WorkspaceItem>('supervisionOrders', { isOptional: true }) as any);
+  //   }
+  //   this.service.search(
+  //     searchOptions,
+  //     undefined,
+  //     this.useCachedVersionIfAvailable,
+  //     true,
+  //     ...followLinks
+  //     ).pipe(getFirstCompletedRemoteData())
+  //     .subscribe((results: RemoteData<SearchObjects<DSpaceObject>>) => {
+  //       if (results.hasSucceeded) {
+  //         if (this.trackStatistics) {
+  //           this.service.trackSearch(searchOptions, results.payload);
+  //         }
+  //         if (results.payload?.page?.length > 0) {
+  //           this.resultFound.emit(results.payload);
+  //         }
+  //       }
+  //       this.resultsRD$.next(results);
+  //     });
   }
 
   /**

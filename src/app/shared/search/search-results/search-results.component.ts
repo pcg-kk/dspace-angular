@@ -11,6 +11,13 @@ import { CollectionElementLinkType } from '../../object-collection/collection-el
 import { ViewMode } from '../../../core/shared/view-mode.model';
 import { Context } from '../../../core/shared/context.model';
 import { PaginatedSearchOptions } from '../models/paginated-search-options.model';
+import {Store} from '@ngrx/store';
+import {SearchModel} from '../@ngrx/search.initial';
+import {searchResults, searchStatus} from '../@ngrx/search.selectors';
+import {map, tap} from 'rxjs/operators';
+import {Observable} from 'rxjs';
+import {Item} from '../../../core/shared/item.model';
+import {ItemSearchResult} from '../../object-collection/shared/item-search-result.model';
 
 export interface SelectionConfig {
   repeatable: boolean;
@@ -104,19 +111,28 @@ export class SearchResultsComponent {
 
   @Output() selectObject: EventEmitter<ListableObject> = new EventEmitter<ListableObject>();
 
+  public isLoading$: Observable<boolean> = this.store.select(searchStatus).pipe(tap(console.log), map((el) => el === 'pending'));
+  public isError$: Observable<boolean> = this.store.select(searchStatus).pipe(map((el) => el === 'error'));
+  public results$ = this.store.select(searchResults).pipe(map((el) => mapSourceToTarget(el)));
+
+  constructor(protected store: Store<SearchModel>) {}
+
   /**
    * Check if search results are loading
    */
   isLoading() {
-    return !this.showError() && (hasNoValue(this.searchResults) || hasNoValue(this.searchResults.payload) || this.searchResults.isLoading);
+    return true;
+    // return !this.showError() && (hasNoValue(this.searchResults) || hasNoValue(this.searchResults.payload) || this.searchResults.isLoading);
   }
 
   showError(): boolean {
-    return this.searchResults?.hasFailed && (!this.searchResults?.errorMessage || this.searchResults?.statusCode !== 400);
+    return false;
+    // return this.searchResults?.hasFailed && (!this.searchResults?.errorMessage || this.searchResults?.statusCode !== 400);
   }
 
   errorMessageLabel(): string {
-    return (this.searchResults?.statusCode  === 422) ? 'error.invalid-search-query' : 'error.search-results';
+    return 'error.search-result';
+    // return (this.searchResults?.statusCode  === 422) ? 'error.invalid-search-query' : 'error.search-results';
   }
 
   /**
@@ -131,4 +147,61 @@ export class SearchResultsComponent {
 
     return result;
   }
+}
+
+export function mapSourceToTarget(source: any): any {
+  if (!source) {
+    return source;
+  }
+  console.log(`map`, source);
+  const page = source._embedded.searchResult._embedded.objects.map((obj: any) => {
+    return Object.assign(new ItemSearchResult(), {
+      hitHighlights: obj.hitHighlights || {},
+      _links: {
+        indexableObject: obj._links.indexableObject
+      },
+      indexableObject: Object.assign(new Item(), {
+        handle: obj._embedded.indexableObject.handle,
+        lastModified: obj._embedded.indexableObject.lastModified,
+        isArchived: obj._embedded.indexableObject.inArchive,
+        isDiscoverable: obj._embedded.indexableObject.discoverable,
+        isWithdrawn: obj._embedded.indexableObject.withdrawn,
+        _links: obj._embedded.indexableObject._links,
+        _name: obj._embedded.indexableObject.name || 'IMPOSSIBLE_TO_MAP',
+        id: obj._embedded.indexableObject.id,
+        uuid: obj._embedded.indexableObject.uuid,
+        type: obj._embedded.indexableObject.type,
+        metadata: obj._embedded.indexableObject.metadata,
+        thumbnail: obj._embedded.indexableObject.thumbnail || { source: { source: { source: { source: {} } } } },
+        accessStatus: obj._embedded.indexableObject.accessStatus || { source: { source: { source: { source: {} } } } },
+        item: obj._embedded.indexableObject.item || {}
+      })
+    });
+  });
+
+  return {
+    timeCompleted: Date.now(),
+    msToLive: 900000,
+    lastUpdated: Date.now(),
+    state: 'Success',
+    errorMessage: null,
+    payload: {
+      type: {
+        value: 'discovery-objects'
+      },
+      page,
+      scope: source.scope,
+      appliedFilters: source.appliedFilters,
+      sort: source.sort,
+      configuration: source.configuration,
+      _links: source._embedded.searchResult._links,
+      pageInfo: {
+        elementsPerPage: source._embedded.searchResult.page.size,
+        totalElements: source._embedded.searchResult.page.totalElements,
+        totalPages: source._embedded.searchResult.page.totalPages,
+        currentPage: source._embedded.searchResult.page.number + 1
+      }
+    },
+    statusCode: 200
+  };
 }

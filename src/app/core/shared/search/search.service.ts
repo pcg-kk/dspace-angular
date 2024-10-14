@@ -1,7 +1,7 @@
 /* eslint-disable max-classes-per-file */
-import { combineLatest as observableCombineLatest, Observable } from 'rxjs';
+import {combineLatest as observableCombineLatest, Observable, throwError} from 'rxjs';
 import { Injectable, OnDestroy } from '@angular/core';
-import { map, switchMap, take } from 'rxjs/operators';
+import {catchError, map, switchMap, take} from 'rxjs/operators';
 import { FollowLinkConfig } from '../../../shared/utils/follow-link-config.model';
 import { ResponseParsingService } from '../../data/parsing.service';
 import { RemoteData } from '../../data/remote-data';
@@ -32,6 +32,7 @@ import { PaginationComponentOptions } from '../../../shared/pagination/paginatio
 import { RestRequest } from '../../data/rest-request.model';
 import { BaseDataService } from '../../data/base/base-data.service';
 import { Angulartics2 } from 'angulartics2';
+import {HttpClient} from '@angular/common/http';
 
 /**
  * A limited data service implementation for the 'discover' endpoint
@@ -96,6 +97,7 @@ export class SearchService implements OnDestroy {
     private paginationService: PaginationService,
     private searchConfigurationService: SearchConfigurationService,
     private angulartics2: Angulartics2,
+    private httpClient: HttpClient,
   ) {
     this.searchDataService = new SearchDataService();
   }
@@ -138,6 +140,11 @@ export class SearchService implements OnDestroy {
    * @returns {Observable<RemoteData<SearchObjects<T>>>} Emits a paginated list with all search results found
    */
   search<T extends DSpaceObject>(searchOptions?: PaginatedSearchOptions, responseMsToLive?: number, useCachedVersionIfAvailable = true, reRequestOnStale = true, ...linksToFollow: FollowLinkConfig<T>[]): Observable<RemoteData<SearchObjects<T>>> {
+    console.log('SEARCH');
+    console.time('SEARCH 1');
+    console.time('SEARCH 2');
+    console.time('SEARCH 3');
+    console.time('SEARCH 4');
     const href$ = this.getEndpoint(searchOptions);
 
     href$.pipe(
@@ -164,6 +171,7 @@ export class SearchService implements OnDestroy {
       });
 
       this.requestService.send(request, useCachedVersionIfAvailable);
+      console.timeEnd('SEARCH 1');
     });
 
     const sqr$ = href$.pipe(
@@ -171,6 +179,16 @@ export class SearchService implements OnDestroy {
     );
 
     return this.directlyAttachIndexableObjects(sqr$, useCachedVersionIfAvailable, reRequestOnStale, ...linksToFollow);
+  }
+
+  pcgSearch(searchOptions: PaginatedSearchOptions): Observable<any> {
+    console.log('pcg serarch', searchOptions);
+
+    const urlLocation = `https://demo.dspace.org/server/api/discover/search/objects?sort=${searchOptions.sort.field},${searchOptions.sort.direction}&page=${searchOptions.pagination.currentPage - 1}&size=${searchOptions.pagination.pageSize}&query=${searchOptions.query}`;
+
+    return this.httpClient
+      .get(urlLocation)
+      .pipe(catchError((error) => throwError(error)));
   }
 
   /**
@@ -248,6 +266,7 @@ export class SearchService implements OnDestroy {
             })
           );
         }
+        console.timeEnd('SEARCH 2');
         // If we don't have a payload, or the page is empty, simply pass on the unmodified
         // RemoteData object
         return [resultsRd];
