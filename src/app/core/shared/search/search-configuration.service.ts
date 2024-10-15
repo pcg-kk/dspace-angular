@@ -319,11 +319,9 @@ export class SearchConfigurationService implements OnDestroy {
       this.getFixedFilterPart(),
       this.getViewModePart(defaults.view)
     ).subscribe((update) => {
-      console.time('next pagination');
       const currentValue: SearchOptions = this.searchOptions.getValue();
       const updatedValue: SearchOptions = Object.assign(new PaginatedSearchOptions({}), currentValue, update);
       this.searchOptions.next(updatedValue);
-      console.timeEnd('next pagination');
     });
   }
 

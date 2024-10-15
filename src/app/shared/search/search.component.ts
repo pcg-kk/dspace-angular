@@ -434,7 +434,6 @@ export class SearchComponent implements OnInit {
    * @private
    */
   private retrieveSearchResults (searchOptions: PaginatedSearchOptions) {
-    console.log('retrieveSearchResults');
     this.store.dispatch(startSearch({searchOptions}));
     // console.time('retrieveSearchResults START PROCESS');
     // console.time('retrieveSearchResults');

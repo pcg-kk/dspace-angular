@@ -3,7 +3,7 @@ import {Actions, createEffect, ofType} from '@ngrx/effects';
 import {errorLocation, pendingSearch, startSearch, successSearch} from './search.actions';
 import {concatMap, of} from 'rxjs';
 import {SearchService} from '../../../core/shared/search/search.service';
-import {catchError, debounceTime, map, tap} from 'rxjs/operators';
+import {catchError, map, tap} from 'rxjs/operators';
 import {Store} from '@ngrx/store';
 
 @Injectable()
@@ -15,7 +15,6 @@ export class SearchEffects {
       concatMap((props) =>
         this.searchService.pcgSearch(props.searchOptions).pipe(
           tap(() => this.store$.dispatch(pendingSearch())),
-          debounceTime(2000),
           map((searchResults) => successSearch({ searchResults })),
           catchError((error) => of(errorLocation({ error }))),
         ),

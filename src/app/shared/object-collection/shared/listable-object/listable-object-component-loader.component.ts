@@ -25,7 +25,6 @@ import { CollectionElementLinkType } from '../../collection-element-link.type';
 import { hasValue, isNotEmpty, hasNoValue } from '../../../empty.util';
 import { DSpaceObject } from '../../../../core/shared/dspace-object.model';
 import { ThemeService } from '../../../theme-support/theme.service';
-import {SearchResult} from '../../../search/models/search-result.model';
 
 @Component({
   selector: 'ds-listable-object-component-loader',
@@ -155,6 +154,7 @@ export class ListableObjectComponentLoaderComponent implements OnInit, OnChanges
   }
 
   private instantiateComponent(object: ListableObject, changes?: SimpleChanges): void {
+
     const component = this.getComponent(object.getRenderTypes(), this.viewMode, this.context);
 
     const viewContainerRef = this.listableObjectDirective.viewContainerRef;

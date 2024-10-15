@@ -121,18 +121,15 @@ export class SearchResultsComponent {
    * Check if search results are loading
    */
   isLoading() {
-    return true;
-    // return !this.showError() && (hasNoValue(this.searchResults) || hasNoValue(this.searchResults.payload) || this.searchResults.isLoading);
+    return !this.showError() && (hasNoValue(this.searchResults) || hasNoValue(this.searchResults.payload) || this.searchResults.isLoading);
   }
 
   showError(): boolean {
-    return false;
-    // return this.searchResults?.hasFailed && (!this.searchResults?.errorMessage || this.searchResults?.statusCode !== 400);
+    return this.searchResults?.hasFailed && (!this.searchResults?.errorMessage || this.searchResults?.statusCode !== 400);
   }
 
   errorMessageLabel(): string {
-    return 'error.search-result';
-    // return (this.searchResults?.statusCode  === 422) ? 'error.invalid-search-query' : 'error.search-results';
+    return (this.searchResults?.statusCode  === 422) ? 'error.invalid-search-query' : 'error.search-results';
   }
 
   /**
@@ -153,7 +150,6 @@ export function mapSourceToTarget(source: any): any {
   if (!source) {
     return source;
   }
-  console.log(`map`, source);
   const page = source._embedded.searchResult._embedded.objects.map((obj: any) => {
     return Object.assign(new ItemSearchResult(), {
       hitHighlights: obj.hitHighlights || {},

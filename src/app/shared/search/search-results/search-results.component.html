@@ -2,7 +2,7 @@
     <h2 *ngIf="!disableHeader">{{ (configuration ? configuration + '.search.results.head' : 'search.results.head') | translate }}</h2>
     <ds-search-export-csv *ngIf="showCsvExport" [searchConfig]="searchConfig"></ds-search-export-csv>
 </div>
-
+{{results$ | async | json}}
 <div *ngIf="results$ | async as searchResults; " @fadeIn>
     <ds-viewable-collection
             [config]="searchConfig.pagination"

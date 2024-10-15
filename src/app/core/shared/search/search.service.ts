@@ -140,11 +140,6 @@ export class SearchService implements OnDestroy {
    * @returns {Observable<RemoteData<SearchObjects<T>>>} Emits a paginated list with all search results found
    */
   search<T extends DSpaceObject>(searchOptions?: PaginatedSearchOptions, responseMsToLive?: number, useCachedVersionIfAvailable = true, reRequestOnStale = true, ...linksToFollow: FollowLinkConfig<T>[]): Observable<RemoteData<SearchObjects<T>>> {
-    console.log('SEARCH');
-    console.time('SEARCH 1');
-    console.time('SEARCH 2');
-    console.time('SEARCH 3');
-    console.time('SEARCH 4');
     const href$ = this.getEndpoint(searchOptions);
 
     href$.pipe(
@@ -182,8 +177,6 @@ export class SearchService implements OnDestroy {
   }
 
   pcgSearch(searchOptions: PaginatedSearchOptions): Observable<any> {
-    console.log('pcg serarch', searchOptions);
-
     const urlLocation = `https://demo.dspace.org/server/api/discover/search/objects?sort=${searchOptions.sort.field},${searchOptions.sort.direction}&page=${searchOptions.pagination.currentPage - 1}&size=${searchOptions.pagination.pageSize}&query=${searchOptions.query}`;
 
     return this.httpClient
