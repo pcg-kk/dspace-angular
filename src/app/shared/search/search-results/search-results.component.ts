@@ -181,6 +181,7 @@ export function mapSourceToTarget(source: any): any {
     lastUpdated: Date.now(),
     state: 'Success',
     errorMessage: null,
+    hasSucceeded: true,
     payload: {
       type: {
         value: 'discovery-objects'

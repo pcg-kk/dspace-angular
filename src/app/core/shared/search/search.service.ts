@@ -166,7 +166,6 @@ export class SearchService implements OnDestroy {
       });
 
       this.requestService.send(request, useCachedVersionIfAvailable);
-      console.timeEnd('SEARCH 1');
     });
 
     const sqr$ = href$.pipe(
@@ -259,7 +258,6 @@ export class SearchService implements OnDestroy {
             })
           );
         }
-        console.timeEnd('SEARCH 2');
         // If we don't have a payload, or the page is empty, simply pass on the unmodified
         // RemoteData object
         return [resultsRd];
