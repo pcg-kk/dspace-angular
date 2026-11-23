@@ -17,46 +17,52 @@
 import 'reflect-metadata';
 import 'zone.js/node';
 
+import { readFileSync } from 'node:fs';
+import { createServer } from 'node:https';
+import { join } from 'node:path';
+
+import { APP_BASE_HREF } from '@angular/common';
+import { enableProdMode } from '@angular/core';
+import { CommonEngine } from '@angular/ssr/node';
+import { TOKENITEM } from '@dspace/core/auth/models/auth-token-info.model';
+import { hasValue } from '@dspace/shared/utils/empty.util';
+import * as compression from 'compression';
+import { renderFile } from 'ejs';
+import express from 'express';
+import expressStaticGzip from 'express-static-gzip';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import { createHttpTerminator } from 'http-terminator';
+import { isbot } from 'isbot';
+import { LRUCache } from 'lru-cache';
 /* eslint-disable import/no-namespace */
 import * as morgan from 'morgan';
-import express from 'express';
-import * as ejs from 'ejs';
-import * as compression from 'compression';
-import expressStaticGzip from 'express-static-gzip';
-import { LRUCache } from 'lru-cache';
-import { isbot } from 'isbot';
 import { createCertificate } from 'pem';
-import { createServer } from 'https';
-import { createHttpTerminator } from 'http-terminator';
 
-import { readFileSync } from 'fs';
-import { join } from 'path';
-
-import { enableProdMode } from '@angular/core';
-
-
-import { environment } from './src/environments/environment';
-import { createProxyMiddleware } from 'http-proxy-middleware';
-import { hasValue } from '@dspace/shared/utils/empty.util';
-import { UIServerConfig } from './src/config/ui-server-config.interface';
-import bootstrap from './src/main.server';
-import { buildAppConfig } from './src/config/config.server';
+import {
+  canCacheSsrRequest,
+  createSsrRefreshContext,
+  getRedisCacheKey,
+  normalizeSsrCacheLanguage,
+  RedisSsrCache,
+} from './server/redis-cache';
+import { RedisCachePolicy } from './server/redis-cache-policy';
 import {
   APP_CONFIG,
   AppConfig,
   toClientConfig,
 } from './src/config/app-config.interface';
+import { buildAppConfig } from './src/config/config.server';
 import { extendEnvironmentWithAppConfig } from './src/config/config.util';
-import { ServerHashedFileMapping } from './src/modules/dynamic-hash/hashed-file-mapping.server';
-import { logStartupMessage } from './startup-message';
-import { TOKENITEM } from '@dspace/core/auth/models/auth-token-info.model';
-import { CommonEngine } from '@angular/ssr/node';
-import { APP_BASE_HREF } from '@angular/common';
+import { SsrExcludePatterns } from './src/config/ssr-config.interface';
+import { UIServerConfig } from './src/config/ui-server-config.interface';
+import { environment } from './src/environments/environment';
 import {
   REQUEST,
   RESPONSE,
 } from './src/express.tokens';
-import { SsrExcludePatterns } from './src/config/ssr-config.interface';
+import bootstrap from './src/main.server';
+import { ServerHashedFileMapping } from './src/modules/dynamic-hash/hashed-file-mapping.server';
+import { logStartupMessage } from './startup-message';
 
 /*
  * Set path for the browser application's dist folder
@@ -81,6 +87,9 @@ let botCache: LRUCache<string, any>;
 // cache of SSR pages for anonymous users. Disabled by default, and only available in production mode
 let anonymousCache: LRUCache<string, any>;
 
+let redisCache: RedisSsrCache;
+let redisCachePolicy: RedisCachePolicy;
+
 // extend environment with app config for server
 extendEnvironmentWithAppConfig(environment, appConfig);
 
@@ -90,6 +99,15 @@ const REST_BASE_URL = environment.rest.ssrBaseUrl || environment.rest.baseUrl;
 // Compile SSR exclude patterns only once at startup, as they do not change at runtime
 // Please note, that regex flags (like "i") are no longer supported.
 const SSR_EXCLUDE_PATTERNS: RegExp[] = environment.ssr.excludePathPatterns.map((p: SsrExcludePatterns) => new RegExp(p.pattern));
+
+// Create CommonEngine only once at startup instead of per request.
+// Its config is derived from environment.*, which is already final at this point and never changes at runtime.
+// "allowedHosts" specifies which hosts are allowed to be rendered via SSR.
+// By default, this is set to the host of the UI's baseUrl.
+const commonEngine = new CommonEngine({
+  enablePerformanceProfiler: environment.ssr.enablePerformanceProfiler,
+  allowedHosts: [ new URL(environment.ui.baseUrl).hostname ],
+});
 
 // The Express app is exported so that it can be used by serverless Functions.
 export function app() {
@@ -139,7 +157,7 @@ export function app() {
    */
   server.use(express.json());
 
-  server.engine('ejs', ejs.renderFile);
+  server.engine('ejs', renderFile);
 
   /*
    * Register the view engines for html and ejs
@@ -185,14 +203,14 @@ export function app() {
    * When it is present, the rateLimiter will be enabled. When it is undefined, the rateLimiter will be disabled.
    */
   if (hasValue((environment.ui as UIServerConfig).rateLimiter)) {
-    const { rateLimit } = require('express-rate-limit')
+    const { rateLimit } = require('express-rate-limit');
     const limiter = rateLimit({
       windowMs: (environment.ui as UIServerConfig).rateLimiter.windowMs,
       limit: (environment.ui as UIServerConfig).rateLimiter.limit,
       standardHeaders: true,
       legacyHeaders: false,
       // don't log ERR_ERL_PERMISSIVE_TRUST_PROXY if we are trusting proxies
-      validate: {trustProxy: !environment.ui.useProxies},
+      validate: { trustProxy: !environment.ui.useProxies },
     });
     server.use(limiter);
   }
@@ -221,7 +239,13 @@ export function app() {
    * Default sending all incoming requests to ngApp() function, after first checking for a cached
    * copy of the page (see cacheCheck())
    */
-  router.get('*', cacheCheck, ngApp);
+  router.get('*', (req, res, next) => {
+    if (redisCacheEnabled() && canCacheRequest(req)) {
+      const languages = environment.languages.filter(language => language.active).map(language => language.code);
+      normalizeSsrCacheLanguage(req, res, languages, environment.fallbackLanguage);
+    }
+    void cacheCheck(req, res, next).catch(next);
+  }, ngApp);
 
   server.use(environment.ui.nameSpace, router);
 
@@ -232,7 +256,7 @@ export function app() {
  * The callback function to serve server side angular
  */
 function ngApp(req, res, next) {
-  if (environment.ssr.enabled && req.method === 'GET' && (req.path === '/' || !isExcludedFromSsr(req.path))) {
+  if (environment.ssr.enabled && req.method === 'GET' && !isUserAuthenticated(req) && (req.path === '/' || !isExcludedFromSsr(req.path))) {
     // Render the page to user via SSR (server side rendering)
     serverSideRender(req, res, next);
   } else {
@@ -249,17 +273,12 @@ function ngApp(req, res, next) {
  * @param res current response
  * @param next the next function
  * @param sendToUser if true (default), send the rendered content to the user.
- * If false, then only save this rendered content to the in-memory cache (to refresh cache).
+ * If false, then only save this rendered content to the cache (to refresh cache).
  */
 function serverSideRender(req, res, next, sendToUser: boolean = true) {
   const { protocol, originalUrl, baseUrl, headers } = req;
-  // "allowedHosts" specifies which hosts are allowed to be rendered via SSR.
-  // By default, this is set to the host of the UI's baseUrl.
-  const commonEngine = new CommonEngine({ enablePerformanceProfiler: environment.ssr.enablePerformanceProfiler,
-                                          allowedHosts: [ new URL(environment.ui.baseUrl).hostname ],
-                                        });
   // Render the page via SSR (server side rendering)
-  commonEngine
+  return commonEngine
     .render({
       bootstrap,
       documentFilePath: indexHtml,
@@ -282,7 +301,7 @@ function serverSideRender(req, res, next, sendToUser: boolean = true) {
         },
       ],
     })
-    .then((html) => {
+    .then(async (html) => {
       // If headers were already sent, then do nothing else, it is probably a
       // redirect response
       if (res.headersSent) {
@@ -296,7 +315,7 @@ function serverSideRender(req, res, next, sendToUser: boolean = true) {
         }
 
         // save server side rendered page to cache (if any are enabled)
-        saveToCache(req, html);
+        await saveToCache(req, html, res);
         if (sendToUser) {
           res.locals.ssr = true;  // mark response as SSR (enables text compression)
           // send rendered page to user
@@ -320,7 +339,9 @@ function serverSideRender(req, res, next, sendToUser: boolean = true) {
           clientSideRender(req, res);
         }
       }
-      next(err);
+      if (sendToUser) {
+        next(err);
+      }
     });
 }
 
@@ -333,7 +354,7 @@ function clientSideRender(req, res) {
   // Replace base href dynamically
   html = html.replace(
     /<base href="[^"]*">/,
-    `<base href="${namespace.endsWith('/') ? namespace : namespace + '/'}">`
+    `<base href="${namespace.endsWith('/') ? namespace : namespace + '/'}">`,
   );
 
   // Replace REST URL with UI URL
@@ -364,6 +385,18 @@ function addCacheControl(req, res, next) {
  * Initialize server-side caching of pages rendered via SSR.
  */
 function initCache() {
+  if (redisCacheEnabled()) {
+    if (!redisCache) {
+      try {
+        redisCachePolicy = new RedisCachePolicy(environment.cache.serverSide.redis);
+        redisCache = new RedisSsrCache(environment.cache.serverSide.redis, environment.cache.serverSide.debug);
+        void redisCache.connect();
+      } catch {
+        console.warn('Unable to initialize Redis SSR cache; check connection settings and route rules. Requests will be rendered without caching.');
+      }
+    }
+    return;
+  }
   if (botCacheEnabled()) {
     // Initialize a new "least-recently-used" item cache (where least recently used pages are removed first)
     // See https://www.npmjs.com/package/lru-cache
@@ -406,18 +439,46 @@ function anonymousCacheEnabled(): boolean {
   return environment.ssr.enabled && environment.cache.serverSide.anonymousCache.max && (environment.cache.serverSide.anonymousCache.max > 0);
 }
 
+/** Redis replaces both LRU caches and is only used for production SSR. */
+function redisCacheEnabled(): boolean {
+  return environment.production && environment.ssr.enabled && !!environment.cache.serverSide.redis?.enabled;
+}
+
+/** Never serve shared pages to authenticated users, or on routes which bypass SSR. */
+function canCacheRequest(req): boolean {
+  return canCacheSsrRequest(req, !!environment.production, environment.ssr.enabled, TOKENITEM, isExcludedFromSsr);
+}
+
 /**
- * Check if the currently requested page is in our server-side, in-memory cache.
+ * Check if the currently requested page is in our server-side cache.
  * Caching is ONLY done for SSR requests. Pages are cached base on their path (e.g. /home or /search?query=test)
  */
-function cacheCheck(req, res, next) {
+async function cacheCheck(req, res, next) {
+  if (!canCacheRequest(req)) {
+    next();
+    return;
+  }
   // Cached copy of page (if found)
   let cachedCopy;
 
   // If the bot cache is enabled and this request looks like a bot, check the bot cache for a cached page.
-  if (botCacheEnabled() && isbot(req.get('user-agent'))) {
+  if (redisCacheEnabled()) {
+    const key = getCacheKey(req);
+    const durations = redisCachePolicy?.getDurationsForUrl(req.url);
+    // A disabled rule also bypasses entries stored before the configuration changed.
+    const cached = durations?.timeToLive > 0 ? await redisCache?.get(key) : undefined;
+    cachedCopy = cached?.value;
+    if (environment.cache.serverSide.debug) {
+      console.debug(`REDIS CACHE ${cached ? 'HIT' : 'MISS'} FOR ${req.url}`);
+    }
+    const refreshTime = durations?.refreshWhenTimeBelow;
+    if (cached && refreshTime > 0 && cached.remainingTime < refreshTime) {
+      // Snapshot the request before Express restores its mounted URL after next('router').
+      void redisCache.refresh(key, refreshCachedPage(req, res));
+    }
+  } else if (botCacheEnabled() && isbot(req.get('user-agent'))) {
     cachedCopy = checkCacheForRequest('bot', botCache, req, res, next);
-  } else if (anonymousCacheEnabled() && !isUserAuthenticated(req)) {
+  } else if (anonymousCacheEnabled()) {
     cachedCopy = checkCacheForRequest('anonymous', anonymousCache, req, res, next);
   }
 
@@ -429,9 +490,16 @@ function cacheCheck(req, res, next) {
           if (environment.cache.serverSide.debug) {
             console.log(`Restore cached ${header} header`);
           }
-          res.setHeader(header, cachedCopy.headers[header]);
+          if (header.toLowerCase() === 'vary') {
+            res.vary(cachedCopy.headers[header]);
+          } else {
+            res.setHeader(header, cachedCopy.headers[header]);
+          }
         }
       });
+    }
+    if (cachedCopy.statusCode) {
+      res.status(cachedCopy.statusCode);
     }
     res.locals.ssr = true;  // mark response as SSR-generated (enables text compression)
     res.send(cachedCopy.page);
@@ -444,6 +512,12 @@ function cacheCheck(req, res, next) {
     // (This should send the request on to the handler that rerenders the page via SSR
     next();
   }
+}
+
+/** Render using a separate response, since the cached response is already sent to the user. */
+function refreshCachedPage(req, res): () => Promise<void> {
+  const { request, response } = createSsrRefreshContext(req, res);
+  return () => serverSideRender(request, response, () => undefined, false);
 }
 
 /**
@@ -491,6 +565,11 @@ function checkCacheForRequest(cacheName: string, cache: LRUCache<string, any>, r
  * @returns cache key to use for this page
  */
 function getCacheKey(req): string {
+  if (redisCacheEnabled()) {
+    // The page handler normalizes this header before cache lookup and SSR.
+    const language = req.get('accept-language') || environment.fallbackLanguage;
+    return getRedisCacheKey(environment.ui.baseUrl, language, req.originalUrl);
+  }
   // NOTE: this will return the URL path *without* any baseUrl
   return req.url;
 }
@@ -502,19 +581,24 @@ function getCacheKey(req): string {
  * @param req current page request
  * @param page page data to save to cache
  */
-function saveToCache(req, page: any) {
+async function saveToCache(req, page: string, response) {
   // Only cache if no one is currently authenticated. This means ONLY public pages can be cached.
   // NOTE: It's not safe to save page data to the cache when a user is authenticated. In that situation,
   // the page may include sensitive or user-specific materials. As the cache is shared across all users, it can only contain public info.
-  if (!isUserAuthenticated(req)) {
+  if (canCacheRequest(req)) {
     const key = getCacheKey(req);
     // Avoid caching "/reload/[random]" paths (these are hard refreshes after logout)
     if (key.startsWith('/reload')) { return; }
-    // Avoid caching not successful responses (status code different from 2XX status)
-    if (hasNotSucceeded(req.res.statusCode)) { return; }
+    // Only cache a fully rendered 200 response.
+    if (response.statusCode !== 200) { return; }
 
     // Retrieve response headers to save, if any
-    const headers = retrieveHeaders(req.res);
+    const headers = retrieveHeaders(response);
+    if (redisCacheEnabled()) {
+      await redisCache?.set(key, { page, headers, statusCode: response.statusCode },
+        redisCachePolicy.getDurationsForUrl(req.url).timeToLive);
+      return;
+    }
     // If bot cache is enabled, save it to that cache if it doesn't exist or is expired
     // (NOTE: has() will return false if page is expired in cache)
     if (botCacheEnabled() && !botCache.has(key)) {
@@ -528,15 +612,6 @@ function saveToCache(req, page: any) {
       if (environment.cache.serverSide.debug) { console.log(`CACHE SAVE FOR ${key} in anonymous cache.`); }
     }
   }
-}
-
-/**
- * Check if status code is different from 2XX
- * @param statusCode
- */
-function hasNotSucceeded(statusCode) {
-  const rgx = new RegExp(/^20+/);
-  return !rgx.test(statusCode);
 }
 
 function retrieveHeaders(response) {
@@ -559,7 +634,7 @@ function retrieveHeaders(response) {
  */
 function isUserAuthenticated(req): boolean {
   // Check whether our DSpace authentication Cookie exists or not
-  return req.cookies[TOKENITEM];
+  return !!req.cookies?.[TOKENITEM] || !!req.get('authorization');
 }
 
 /*
@@ -587,6 +662,7 @@ function createHttpsServer(keys) {
     void (async ()=> {
       console.debug('Closing HTTPS server on signal');
       await terminator.terminate().catch(e => { console.error(e); });
+      await redisCache?.close();
       console.debug('HTTPS server closed');
     })();
   });
@@ -611,6 +687,7 @@ function run() {
     void (async () => {
       console.debug('Closing HTTP server on signal');
       await terminator.terminate().catch(e => { console.error(e); });
+      await redisCache?.close();
       console.debug('HTTP server closed.');return undefined;
     })();
   });
