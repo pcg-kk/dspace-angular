@@ -255,8 +255,16 @@ continue to render. See `config/config.example.yml` for all Redis settings.
 On a cache hit near expiry, one worker refreshes the page in the background while the cached page
 is returned immediately. Expired pages are not served. Only responses with HTTP status 200 are cached.
 HTML, configured response headers (such as signposting `Link`) and the status code are stored together.
-Keys isolate deployments, language preferences and full URLs, including query strings. Choose a unique `keyPrefix` for each
+Keys isolate deployments, negotiated languages and full URLs, including query strings. Choose a unique `keyPrefix` for each
 deployment and change it when deploying changes that should invalidate existing cached pages.
+
+For Redis-eligible requests, an active `dsLanguage` cookie takes precedence; otherwise the language
+is negotiated from `Accept-Language` against active UI languages, respecting quality values, with
+`fallbackLanguage` used when none match. The request header is normalized to that single language
+before cache lookup and SSR, so translations and REST requests use the same preference as the cache key.
+Responses include `Vary: Accept-Language, Cookie`. Existing `Vary` fields are preserved.
+Language fallback within SSR REST requests therefore no longer depends on the original list of browser preferences.
+Change `keyPrefix` when deploying this normalization to avoid reusing pages rendered with the previous preferences.
 
 Redis is disabled by default. When enabled but unavailable, requests are rendered without caching;
 connection retries run in the background and cache operations have a bounded wait time. Disable
